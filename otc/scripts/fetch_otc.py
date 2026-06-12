@@ -203,6 +203,8 @@ def fetch_bybit(asset, fiat, user_side):
         "authMaker": False, "canTrade": False,
     })
     items = (j.get("result") or {}).get("items") or []
+    if not items:
+        raise RuntimeError("空列表: %s" % snip(j, 160))
     pmap = bybit_payment_map()
     ads = []
     for it in items[:ROWS]:
@@ -216,78 +218,89 @@ def fetch_bybit(asset, fiat, user_side):
 
 
 # ------------------------------------------------------------------- Gate ----
+def snip(j, n=160):
+    try:
+        return json.dumps(j, ensure_ascii=False)[:n]
+    except Exception:  # noqa: BLE001
+        return str(j)[:n]
+
+
+def gate_parse_rows(j):
+    if not isinstance(j, dict):
+        return None
+    for k in ("push_order", "data", "datas", "list"):
+        v = j.get(k)
+        if isinstance(v, list) and v:
+            return v
+        if isinstance(v, dict):
+            for kk in ("list", "rows", "push_order", "records"):
+                if isinstance(v.get(kk), list) and v[kk]:
+                    return v[kk]
+    return None
+
+
 def fetch_gate(asset, fiat, user_side):
     sym = "%s_%s" % (asset.upper(), fiat.upper())
-    # 候选端点 1: 站内 json_svr push_order_list
     errors = []
-    try:
-        push_type = "2" if user_side == "buy" else "1"  # 2=商家卖出列表
-        j = http_json("POST", "https://www.gate.io/json_svr/query_push/",
-                      data={"type": "push_order_list", "symbol": sym,
-                            "big_trade": "0", "fiat_amount": "", "amount": "",
-                            "pay_type": "", "is_blue": "0", "have_traded": "0",
-                            "follow": "0", "per_page": str(ROWS),
-                            "push_type": push_type, "page": "1"},
-                      headers={"X-Requested-With": "XMLHttpRequest",
-                               "Referer": "https://www.gate.io/zh/c2c/%s" % sym.lower().replace("_", "-")},
-                      allow_proxy=False)
-        if PROBE:
-            log("PROBE gate json_svr: %s" % json.dumps(j, ensure_ascii=False)[:800])
-        rows = None
-        if isinstance(j, dict):
-            for k in ("push_order", "data", "datas", "list"):
-                v = j.get(k)
-                if isinstance(v, list) and v:
-                    rows = v
-                    break
-                if isinstance(v, dict):
-                    for kk in ("list", "rows", "push_order"):
-                        if isinstance(v.get(kk), list) and v[kk]:
-                            rows = v[kk]
-                            break
-        if rows:
+    # 候选 1: 站内 json_svr push_order_list (gate.com 新域名优先, 旧域名兜底)
+    push_type = "2" if user_side == "buy" else "1"  # 2=商家卖出列表
+    for host in ("www.gate.com", "www.gate.io"):
+        try:
+            j = http_json("POST", "https://%s/json_svr/query_push/" % host,
+                          data={"type": "push_order_list", "symbol": sym,
+                                "big_trade": "0", "fiat_amount": "", "amount": "",
+                                "pay_type": "", "is_blue": "0", "have_traded": "0",
+                                "follow": "0", "per_page": str(ROWS),
+                                "push_type": push_type, "page": "1"},
+                          headers={"X-Requested-With": "XMLHttpRequest",
+                                   "Referer": "https://%s/zh/c2c/%s" % (host, sym.lower().replace("_", "-"))},
+                          allow_proxy=False)
+            if PROBE:
+                log("PROBE gate %s json_svr: %s" % (host, snip(j, 800)))
+            rows = gate_parse_rows(j)
+            if rows:
+                ads = []
+                for it in rows[:ROWS]:
+                    ads.append(make_ad(
+                        it.get("rate") or it.get("price"),
+                        it.get("curr_amount") or it.get("amount"),
+                        it.get("limit_min") or it.get("min_amount"),
+                        it.get("limit_total") or it.get("limit_max") or it.get("max_amount"),
+                        gate_paytypes(it),
+                        it.get("username") or it.get("nickname") or it.get("user_name"),
+                        it.get("deal_count") or it.get("month_finish_count"),
+                        it.get("complete_rate") or it.get("deal_rate")))
+                return ads
+            errors.append("%s json_svr 空: %s" % (host, snip(j, 80)))
+        except Exception as e:  # noqa: BLE001
+            errors.append("%s json_svr: %s" % (host, str(e)[:90]))
+    # 候选 2: apiw v2 GET (可走公共代理绕过风控)
+    for host in ("www.gate.com", "www.gate.io"):
+        try:
+            side = "sell" if user_side == "buy" else "buy"
+            j = http_json("GET", "https://%s/apiw/v2/c2c/advertisements" % host, params={
+                "asset": asset.upper(), "fiat": fiat.upper(), "side": side,
+                "page": 1, "limit": ROWS,
+            }, allow_proxy=True)
+            if PROBE:
+                log("PROBE gate %s apiw: %s" % (host, snip(j, 800)))
+            rows = gate_parse_rows(j) or []
             ads = []
             for it in rows[:ROWS]:
                 ads.append(make_ad(
-                    it.get("rate") or it.get("price"),
-                    it.get("curr_amount") or it.get("amount"),
-                    it.get("limit_min") or it.get("min_amount"),
-                    it.get("limit_total") or it.get("limit_max") or it.get("max_amount"),
-                    gate_paytypes(it),
-                    it.get("username") or it.get("nickname") or it.get("user_name"),
-                    it.get("deal_count") or it.get("month_finish_count"),
-                    it.get("月成单率") or it.get("complete_rate") or it.get("deal_rate")))
-            return ads
-        errors.append("json_svr: no rows")
-    except Exception as e:  # noqa: BLE001
-        errors.append("json_svr: %s" % e)
-    # 候选端点 2: apiw v2 (新版 P2P 页面接口)
-    try:
-        side = "sell" if user_side == "buy" else "buy"
-        j = http_json("GET", "https://www.gate.io/apiw/v2/c2c/advertisements", params={
-            "asset": asset.upper(), "fiat": fiat.upper(), "side": side,
-            "page": 1, "limit": ROWS,
-        }, allow_proxy=False)
-        if PROBE:
-            log("PROBE gate apiw: %s" % json.dumps(j, ensure_ascii=False)[:800])
-        rows = ((j.get("data") or {}).get("list")
-                if isinstance(j.get("data"), dict) else j.get("data")) or []
-        ads = []
-        for it in rows[:ROWS]:
-            ads.append(make_ad(
-                it.get("price"), it.get("available") or it.get("amount"),
-                it.get("min_limit") or it.get("minLimit"),
-                it.get("max_limit") or it.get("maxLimit"),
-                it.get("pay_types") or it.get("payTypes") or [],
-                (it.get("merchant") or {}).get("name") if isinstance(it.get("merchant"), dict)
-                else it.get("merchant_name") or it.get("nickname"),
-                it.get("orders") or it.get("order_count"),
-                it.get("rate") or it.get("finish_rate")))
-        if ads:
-            return ads
-        errors.append("apiw: no rows")
-    except Exception as e:  # noqa: BLE001
-        errors.append("apiw: %s" % e)
+                    it.get("price"), it.get("available") or it.get("amount"),
+                    it.get("min_limit") or it.get("minLimit"),
+                    it.get("max_limit") or it.get("maxLimit"),
+                    it.get("pay_types") or it.get("payTypes") or [],
+                    (it.get("merchant") or {}).get("name") if isinstance(it.get("merchant"), dict)
+                    else it.get("merchant_name") or it.get("nickname"),
+                    it.get("orders") or it.get("order_count"),
+                    it.get("rate") or it.get("finish_rate")))
+            if ads:
+                return ads
+            errors.append("%s apiw 空: %s" % (host, snip(j, 80)))
+        except Exception as e:  # noqa: BLE001
+            errors.append("%s apiw: %s" % (host, str(e)[:90]))
     raise RuntimeError(" | ".join(errors))
 
 
@@ -313,6 +326,11 @@ def fetch_bitget(asset, fiat, user_side):
         ("https://www.bitget.com/v1/p2p/pub/adv/queryAdvList",
          {"side": side, "pageNo": 1, "pageSize": ROWS, "coinCode": asset,
           "fiatCode": fiat, "languageType": 6, "payMethodId": None, "amount": ""}),
+        # 变体: 字符串 side + 常见可选过滤字段
+        ("https://www.bitget.com/v1/p2p/pub/adv/queryAdvList",
+         {"side": str(side), "pageNo": "1", "pageSize": str(ROWS),
+          "coinCode": asset, "fiatCode": fiat, "languageType": 0,
+          "orderBy": 1, "userType": 0, "amount": "", "payMethodIdList": []}),
         ("https://www.bitget.com/v1/p2p/pub/adv/list",
          {"side": side, "pageNo": 1, "pageSize": ROWS, "coinCode": asset,
           "fiatCode": fiat, "languageType": 6}),
@@ -350,24 +368,57 @@ def fetch_bitget(asset, fiat, user_side):
                         it.get("goodRate") or it.get("turnoverRate") or user.get("goodRate")))
                 if ads:
                     return ads
-            errors.append("%s: empty (code=%s msg=%s)" % (url, j.get("code"), j.get("msg")))
+            errors.append("空响应: %s" % snip(j, 140))
         except Exception as e:  # noqa: BLE001
-            errors.append("%s: %s" % (url, e))
+            errors.append("%s" % str(e)[:120])
     raise RuntimeError(" | ".join(errors))
 
 
 # -------------------------------------------------------------------- HTX ----
 HTX_HOSTS = ["https://otc-api.trygofast.com", "https://otc-api.huobi.pro"]
 HTX_COIN = {"USDT": 2, "BTC": 1, "ETH": 3, "USDC": 7}
-HTX_CURRENCY = {"CNY": 172, "USD": 2, "EUR": 14, "HKD": 22}
+HTX_CURRENCY_STATIC = {"CNY": 172, "USD": 2}  # 实测验证过的 id
 HTX_PAY = {"1": "银行卡", "2": "支付宝", "3": "微信", "9": "银行卡"}
+HTX_CURRENCY_CACHE = {}
+
+
+def htx_currency_map():
+    """动态拉取 HTX 法币 id 表, 失败则用静态映射。"""
+    global HTX_CURRENCY_CACHE
+    if HTX_CURRENCY_CACHE:
+        return HTX_CURRENCY_CACHE
+    for host in HTX_HOSTS:
+        for path in ("/v1/data/currencies?language=zh-CN", "/v1/data/currencies",
+                     "/v1/data/config/currencies"):
+            try:
+                j = http_json("GET", host + path, allow_proxy=False, timeout=12)
+                rows = j.get("data") or []
+                m = {}
+                for it in rows:
+                    if not isinstance(it, dict):
+                        continue
+                    code = (it.get("nameShort") or it.get("code") or
+                            it.get("currencyCode") or "").upper()
+                    cid = it.get("currencyId") or it.get("id")
+                    if code and cid:
+                        m[code] = int(cid)
+                if m:
+                    if PROBE:
+                        log("PROBE htx currencies via %s%s: %s" % (host, path, snip(m, 300)))
+                    HTX_CURRENCY_CACHE = m
+                    return m
+            except Exception as e:  # noqa: BLE001
+                if PROBE:
+                    log("PROBE htx currencies %s%s fail: %s" % (host, path, e))
+    HTX_CURRENCY_CACHE = dict(HTX_CURRENCY_STATIC)
+    return HTX_CURRENCY_CACHE
 
 
 def fetch_htx(asset, fiat, user_side):
     coin = HTX_COIN.get(asset)
-    curr = HTX_CURRENCY.get(fiat)
+    curr = htx_currency_map().get(fiat) or HTX_CURRENCY_STATIC.get(fiat)
     if not coin or not curr:
-        raise RuntimeError("unsupported pair")
+        raise RuntimeError("HTX 不支持该交易对(无货币映射)")
     trade_type = "sell" if user_side == "buy" else "buy"  # sell=商家卖出
     errors = []
     for host in HTX_HOSTS:
@@ -458,6 +509,9 @@ def normalize_sides(buy, sell):
     return buy, sell
 
 
+FAIR = {}  # (asset, fiat) -> 公允参考价, 主流程填充
+
+
 def fetch_market(ex, asset, fiat):
     f = FETCHERS[ex]
     out = {"ok": False, "error": None, "buy": [], "sell": [], "ts": int(time.time())}
@@ -466,6 +520,14 @@ def fetch_market(ex, asset, fiat):
         time.sleep(0.4)
         sell = f(asset, fiat, "sell")
         buy, sell = normalize_sides(buy, sell)
+        # 法币映射错误熔断: 买卖两侧同向偏离公允价 >25% 视为脏数据
+        fair = FAIR.get((asset, fiat))
+        if fair and buy and sell:
+            db = buy[0]["price"] / fair - 1
+            ds = sell[0]["price"] / fair - 1
+            if abs(db) > 0.25 and abs(ds) > 0.25 and db * ds > 0:
+                raise RuntimeError("疑似法币/字段映射错误: 价格 %s/%s 偏离公允价 %.4g 超 25%%"
+                                   % (buy[0]["price"], sell[0]["price"], fair))
         out["buy"], out["sell"] = buy, sell
         out["ok"] = bool(buy or sell)
         if not out["ok"]:
@@ -538,6 +600,10 @@ def main():
     fx = fetch_fx()
     spot = fetch_spot()
     log("fx=%s spot=%s" % (fx, spot))
+    for fiat in FIATS:
+        for asset in ASSETS_BY_FIAT[fiat]:
+            if fx.get(fiat) and spot.get(asset):
+                FAIR[(asset, fiat)] = fx[fiat] * spot[asset]
 
     markets = {}
     ok_count = err_count = 0
