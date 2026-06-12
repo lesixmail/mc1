@@ -57,7 +57,8 @@ jobs:
         run: bash otc/scripts/run_loop.sh "${{ inputs.cycles || '11' }}" 300
 
       - name: Self re-dispatch (持续运行)
-        if: always()
+        # 取消运行时不续期 (手动取消即可停链, 看门狗 cron 会按需拉起)
+        if: success() || failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
