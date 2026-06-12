@@ -15,8 +15,15 @@ on:
       probe:
         description: "探测模式: 打印交易所原始响应 (true/false)"
         default: "false"
+  push:
+    branches: [claude/otc-market-monitor-xjsjiy]
+    paths: ["otc/**", ".github/workflows/otc-monitor.yml"]
   schedule:
     - cron: "17,47 * * * *"
+
+env:
+  # 监控代码所在分支 (调度入口可能在 main, 实际代码固定从这里取)
+  MONITOR_REF: claude/otc-market-monitor-xjsjiy
 
 permissions:
   contents: write
@@ -33,6 +40,8 @@ jobs:
     timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MONITOR_REF }}
 
       - uses: actions/setup-python@v5
         with:
@@ -54,8 +63,10 @@ jobs:
         run: |
           state=$(tr -d '[:space:]' < otc/AUTORUN 2>/dev/null || echo off)
           if [ "$state" = "on" ]; then
-            echo "续期下一轮运行 (ref=${GITHUB_REF_NAME})"
-            gh workflow run otc-monitor.yml --ref "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" || true
+            echo "续期下一轮运行"
+            gh workflow run otc-monitor.yml --ref "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" \
+              || gh workflow run otc-monitor.yml --ref "${MONITOR_REF}" -R "${GITHUB_REPOSITORY}" \
+              || echo "续期失败 (等待 schedule 看门狗拉起)"
           else
             echo "AUTORUN=$state, 停止自动续期"
           fi
