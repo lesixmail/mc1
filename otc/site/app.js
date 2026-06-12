@@ -101,8 +101,8 @@ function best(m, side) {
 }
 function fmtP(v, digits) {
   if (v == null || isNaN(v)) return "--";
-  const d = digits ?? (v >= 1000 ? 0 : v >= 100 ? 2 : v >= 10 ? 3 : 4);
-  return v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const d = digits ?? (v >= 1000 ? 0 : v >= 10 ? 2 : v >= 1 ? 3 : 4);
+  return v.toLocaleString("en-US", { minimumFractionDigits: Math.min(2, d), maximumFractionDigits: d });
 }
 function fmtPct(v, signed = true) {
   if (v == null || isNaN(v)) return "--";
