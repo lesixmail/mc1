@@ -1,0 +1,73 @@
+# OTC 市场监控: 周期抓取 6 大交易所 P2P/OTC 盘口并发布到 GitHub Pages
+#
+# 运行模型:
+#   - 每次运行内部循环 N 轮 (默认 11 轮 x 5 分钟 ≈ 55 分钟), 结束时自动再次派发自己,
+#     从而实现 7x24 持续监控 (将 otc/AUTORUN 改为 off 即停止续期)。
+#   - schedule 触发器是看门狗, 链条意外中断时自动拉起。
+#   - 此文件在 main 上仅作为调度注册入口; 监控代码固定从 MONITOR_REF 分支检出。
+name: OTC Monitor
+
+on:
+  workflow_dispatch:
+    inputs:
+      cycles:
+        description: "本次运行抓取轮数 (每轮间隔 5 分钟)"
+        default: "11"
+      probe:
+        description: "探测模式: 打印交易所原始响应 (true/false)"
+        default: "false"
+  push:
+    branches: [claude/otc-market-monitor-xjsjiy]
+    paths: ["otc/**", ".github/workflows/otc-monitor.yml"]
+  schedule:
+    - cron: "17,47 * * * *"
+
+env:
+  # 监控代码所在分支 (调度入口可能在 main, 实际代码固定从这里取)
+  MONITOR_REF: claude/otc-market-monitor-xjsjiy
+
+permissions:
+  contents: write
+  pages: write
+  actions: write
+
+concurrency:
+  group: otc-monitor
+  cancel-in-progress: true
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MONITOR_REF }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip -q install requests
+
+      - name: Run monitor loop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROBE: ${{ inputs.probe == 'true' && '1' || '' }}
+        run: bash otc/scripts/run_loop.sh "${{ inputs.cycles || '11' }}" 300
+
+      - name: Self re-dispatch (持续运行)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          state=$(tr -d '[:space:]' < otc/AUTORUN 2>/dev/null || echo off)
+          if [ "$state" = "on" ]; then
+            echo "续期下一轮运行"
+            gh workflow run otc-monitor.yml --ref "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" \
+              || gh workflow run otc-monitor.yml --ref "${MONITOR_REF}" -R "${GITHUB_REPOSITORY}" \
+              || echo "续期失败 (等待 schedule 看门狗拉起)"
+          else
+            echo "AUTORUN=$state, 停止自动续期"
+          fi
