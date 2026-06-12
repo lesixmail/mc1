@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OTC 雷达 · 六大交易所场外市场全景监控</title>
+<meta name="description" content="实时监控 Binance / OKX / Bybit / Gate / Bitget / HTX 六大交易所 P2P/OTC 市场:买卖盘口、场外折溢价指数、跨所价差、商家挂单、历史走势与预警。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>📡</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-icon">📡</span>
+    <div>
+      <h1>OTC 雷达 <span class="brand-en">OTC Radar</span></h1>
+      <p class="brand-sub">六大交易所场外市场全景监控</p>
+    </div>
+  </div>
+  <div class="controls">
+    <div class="seg" id="fiat-seg" title="法币"></div>
+    <div class="seg" id="asset-seg" title="资产"></div>
+  </div>
+  <div class="status">
+    <div class="status-line"><span class="dot" id="conn-dot"></span><span id="update-time">加载中…</span></div>
+    <div class="status-line muted"><span id="countdown">--</span> 秒后刷新 · <span id="src-health">-</span></div>
+  </div>
+</header>
+
+<nav class="subnav" id="subnav">
+  <a href="#sec-index">溢价指数</a>
+  <a href="#sec-cards">交易所概览</a>
+  <a href="#sec-compare">跨所对比</a>
+  <a href="#sec-arb">套利监测</a>
+  <a href="#sec-depth">市场深度</a>
+  <a href="#sec-history">历史走势</a>
+  <a href="#sec-ads">商家挂单</a>
+  <a href="#sec-alerts">预警</a>
+</nav>
+
+<main>
+  <!-- 场外折溢价指数 -->
+  <section id="sec-index" class="panel banner">
+    <div class="banner-main">
+      <div class="banner-label">场外折溢价指数 <span class="hint" title="全市场买一/卖一中间价均值 ÷ (法币汇率 × 现货指数价) × 100。大于 100 表示场外溢价(入金需求强), 小于 100 表示折价(出金需求强)。参考 ChaiNext USDT 场外指数方法。">?</span></div>
+      <div class="banner-value" id="premium-index">--</div>
+      <div class="banner-tag" id="premium-tag">--</div>
+    </div>
+    <div class="banner-grid" id="banner-grid"></div>
+  </section>
+
+  <!-- 交易所卡片 -->
+  <section id="sec-cards">
+    <h2>交易所概览 <span class="h2-sub" id="cards-sub"></span></h2>
+    <div class="cards" id="cards"></div>
+  </section>
+
+  <!-- 跨所对比 -->
+  <section id="sec-compare" class="panel">
+    <h2>跨所盘口对比</h2>
+    <div class="table-wrap">
+      <table id="compare-table">
+        <thead><tr>
+          <th>交易所</th><th>买一价<span class="th-sub">我要买入</span></th><th>卖一价<span class="th-sub">我要卖出</span></th>
+          <th>买卖价差</th><th>溢价(买)</th><th>溢价(卖)</th>
+          <th>买盘挂单量</th><th>卖盘挂单量</th><th>状态</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 套利监测 -->
+  <section id="sec-arb" class="panel">
+    <h2>跨所搬砖套利监测 <span class="h2-sub">未计手续费与转账成本, 仅供参考</span></h2>
+    <div class="table-wrap">
+      <table id="arb-table">
+        <thead><tr><th>#</th><th>买入(低价所)</th><th>买入价</th><th>卖出(高价所)</th><th>卖出价</th><th>毛价差</th><th>毛利率</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 市场深度 -->
+  <section id="sec-depth" class="panel">
+    <h2>合并市场深度 <span class="h2-sub">各所前 15 档挂单累计量(实线=可买入盘, 虚线=可卖出盘)</span></h2>
+    <div id="depth-chart" class="chart tall"></div>
+  </section>
+
+  <!-- 历史走势 -->
+  <section id="sec-history" class="panel">
+    <h2>历史走势</h2>
+    <div class="chart-toolbar">
+      <div class="seg" id="hist-mode">
+        <button data-v="price" class="on">价格</button>
+        <button data-v="premium">溢价 %</button>
+        <button data-v="spread">买卖价差</button>
+      </div>
+      <div class="seg" id="hist-range">
+        <button data-v="86400" class="on">24小时</button>
+        <button data-v="604800">7天</button>
+        <button data-v="2592000">30天</button>
+      </div>
+    </div>
+    <div id="history-chart" class="chart tall"></div>
+  </section>
+
+  <!-- 商家挂单 -->
+  <section id="sec-ads" class="panel">
+    <h2>商家挂单簿</h2>
+    <div class="ads-toolbar">
+      <div class="seg" id="side-seg">
+        <button data-v="buy" class="on">我要买入</button>
+        <button data-v="sell">我要卖出</button>
+      </div>
+      <div class="seg" id="ex-filter"></div>
+      <div class="seg" id="pay-filter">
+        <button data-v="" class="on">全部支付</button>
+        <button data-v="支付宝">支付宝</button>
+        <button data-v="微信">微信</button>
+        <button data-v="银行卡">银行卡</button>
+      </div>
+      <input id="amount-filter" type="number" placeholder="按金额筛选限额" min="0">
+    </div>
+    <div class="table-wrap">
+      <table id="ads-table">
+        <thead><tr>
+          <th>交易所</th><th>商家</th><th>价格</th><th>溢价</th><th>可交易量</th><th>单笔限额</th><th>支付方式</th><th>成单数</th><th>成单率</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 预警 -->
+  <section id="sec-alerts" class="panel">
+    <h2>价格预警 <span class="h2-sub">条件满足时浏览器通知 + 提示音(本地保存, 需保持页面开启)</span></h2>
+    <div class="alert-form">
+      <select id="alert-metric">
+        <option value="index">溢价指数</option>
+        <option value="buy1">买一价</option>
+        <option value="sell1">卖一价</option>
+        <option value="arb">最大跨所毛利率%</option>
+      </select>
+      <select id="alert-ex"></select>
+      <select id="alert-op"><option value=">">高于</option><option value="<">低于</option></select>
+      <input id="alert-value" type="number" step="any" placeholder="阈值">
+      <button id="alert-add" class="btn">添加预警</button>
+      <button id="alert-notify" class="btn ghost">开启浏览器通知</button>
+    </div>
+    <ul id="alert-list" class="alert-list"></ul>
+  </section>
+
+  <!-- 数据源状态 -->
+  <section id="sec-srcs" class="panel">
+    <h2>数据源状态</h2>
+    <div class="src-grid" id="src-grid"></div>
+  </section>
+</main>
+
+<footer>
+  <p><strong>OTC 雷达</strong> · 数据来源: Binance P2P / OKX C2C / Bybit P2P / Gate C2C / Bitget P2P / HTX OTC 公开接口 · 法币汇率: open.er-api.com · 现货指数: Binance/Bybit 现货。</p>
+  <p>采集端每 5 分钟自动更新, 页面每 60 秒自动拉取。指数方法参考 ChaiNext USDT 场外折溢价指数; 功能对标 P2P.Army / BestChange 等行业工具。</p>
+  <p class="warn">⚠️ 风险提示: 本站仅作行情聚合展示, 不构成任何投资建议。场外交易存在收款风险(冻卡)、对手方欺诈等风险, 部分地区法币兑换加密货币受当地法规限制, 请自行评估合规性。</p>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"
+        onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/echarts@5.5.0/dist/echarts.min.js';s.onload=window.__echartsReady;document.head.appendChild(s);"></script>
+<script src="app.js"></script>
+</body>
+</html>
