@@ -43,50 +43,13 @@ push_branch() { # $1=dir $2=branch $3=msg
   )
 }
 
-publish_site() {
-  rm -rf "$WORK/site"
-  mkdir -p "$WORK/site/data"
-  cp -r "$SITE_SRC"/. "$WORK/site/"
-  cp "$DATA_DIR"/latest.json "$WORK/site/data/" 2>/dev/null || true
-  cp "$DATA_DIR"/history.json "$WORK/site/data/" 2>/dev/null || true
-  touch "$WORK/site/.nojekyll"
-  push_branch "$WORK/site" gh-pages "publish site $(date -u +%FT%TZ)" \
-    && echo "[loop] 站点已发布到 gh-pages"
-}
-
-ensure_pages() {
-  local api="https://api.github.com/repos/${REPO}/pages"
-  local cfg='{"build_type":"legacy","source":{"branch":"gh-pages","path":"/"}}'
-  local code
-  code=$(curl -s -o /tmp/pages-get.json -w '%{http_code}' \
-    -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "$api")
-  if [ "$code" = "404" ]; then
-    echo "[loop] 开通 GitHub Pages..."
-    curl -s -X POST -H "Authorization: Bearer ${TOKEN}" \
-      -H "Accept: application/vnd.github+json" "$api" -d "$cfg" | head -c 400
-    echo
-  else
-    echo "[loop] Pages 已开通 (HTTP $code): $(head -c 200 /tmp/pages-get.json)"
-    curl -s -X PUT -H "Authorization: Bearer ${TOKEN}" \
-      -H "Accept: application/vnd.github+json" "$api" -d "$cfg" -o /dev/null || true
-  fi
-}
-
+# 站点本体由工作流的 pages job 发布 (workflow 构建类型), 此循环只负责数据分支。
 for ((i = 1; i <= CYCLES; i++)); do
   echo "=== cycle $i/$CYCLES $(date -u +%FT%TZ) ==="
   if python3 "$FETCHER" --out "$DATA_DIR" ${PROBE:+--probe}; then
     push_branch "$DATA_DIR" otc-data "data $(date -u +%FT%TZ)" || echo "[loop] 数据推送失败"
-    if [ "$i" -eq 1 ]; then
-      publish_site
-      ensure_pages
-    fi
   else
     echo "[loop] 第 $i 轮抓取失败, 跳过发布"
-    # 即便抓取全挂, 首轮也要保证站点在线
-    if [ "$i" -eq 1 ] && [ -f "$DATA_DIR/latest.json" ]; then
-      publish_site
-      ensure_pages
-    fi
   fi
   if [ "$i" -lt "$CYCLES" ]; then
     sleep "$INTERVAL"

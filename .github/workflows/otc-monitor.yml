@@ -35,6 +35,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 站点发布: 仅在 main 引用的运行 (schedule / 对 main 的 dispatch) 中执行,
+  # 因为 github-pages 环境的保护规则只放行默认分支的部署。
+  pages:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+      contents: read
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MONITOR_REF }}
+      - name: Bundle site with latest data snapshot
+        run: |
+          mkdir -p otc/site/data
+          git fetch -q --depth 1 origin otc-data || true
+          git show origin/otc-data:latest.json  > otc/site/data/latest.json  2>/dev/null || echo '{}' > otc/site/data/latest.json
+          git show origin/otc-data:history.json > otc/site/data/history.json 2>/dev/null || echo '{}' > otc/site/data/history.json
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: otc/site
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
   monitor:
     runs-on: ubuntu-latest
     timeout-minutes: 80
