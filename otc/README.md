@@ -2,7 +2,14 @@
 
 实时监控 **Binance / OKX / Bybit / Gate / Bitget / HTX** 六大交易所的 P2P/OTC 市场。
 
-**在线访问: https://lesixmail.github.io/mc1/**
+## 在线访问
+
+- **即时公网链接(无需任何配置)**: https://raw.githack.com/lesixmail/mc1/gh-pages/index.html
+- **正式链接(推荐)**: https://lesixmail.github.io/mc1/ — 首次需要仓库管理员一次性开通:
+  打开 `Settings → Pages → Build and deployment → Source` 选择 **GitHub Actions** 即可,
+  之后工作流会自动持续部署(每 30 分钟的 main 调度运行会执行 pages job)。
+  也可选择 "Deploy from a branch" + `gh-pages` 分支,效果相同。
+  (Pages 站点的"创建"动作 GitHub 限定管理员权限,Actions 的 GITHUB_TOKEN 无法代办,故需手动点一次。)
 
 ## 功能(对标 P2P.Army、AICoin/ChaiNext 场外指数、BestChange 等行业工具)
 
@@ -51,10 +58,14 @@ cd otc/site && python3 -m http.server 8000
 
 `history.json`: `{series:{"CNY|USDT|okx":[[ts,买一,卖一],…], "fx|CNY":[[ts,汇率,null],…]}}`
 
-## 已知限制
+## 已知限制(2026-06 实测)
 
-- Binance P2P 已于 2021 年下架 CNY 交易对,故 CNY 视图下币安显示"不支持";USD/EUR 等正常。
-- 部分交易所接口对数据中心 IP 有地区限制,采集器内置了候选域名与公共代理回退,个别交易所仍可能间歇不可用(状态面板会如实显示)。
+- **Gate**: 全站(含 gate.com/gate.io 双域名)被 Akamai 风控拦截数据中心流量,接口返回 403,
+  状态面板如实显示"风控限制"。如有自建代理可在 `fetch_otc.py` 的 `http_json` 中接入。
+- **Bybit / Bitget 的 CNY**: 接口正常但在线广告数为 0(两所已不开 CNY P2P 市场),HKD 同理(Bitget)。
+  CNY 实际有盘口的是 Binance / OKX / HTX 三所。
+- **HTX**: 无 USDC 市场;法币 id 通过接口动态发现,发现不了的法币按"未开通"处理。
+- 采集器带"公允价偏离 25% 熔断",自动丢弃疑似映射错误的脏数据。
 - 套利监测为毛价差,未计入手续费、提币费与转账时间成本。
 
 ⚠️ 本项目仅作行情聚合展示,不构成投资建议;场外交易请自行评估对手方与合规风险。

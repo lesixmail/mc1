@@ -41,6 +41,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Pages 站点首次创建需要管理员在 Settings → Pages 选择 "GitHub Actions" 源;
+    # 开通前此 job 会失败, 不应拖垮监控链
+    continue-on-error: true
     permissions:
       pages: write
       id-token: write

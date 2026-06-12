@@ -202,8 +202,11 @@ def fetch_bybit(asset, fiat, user_side):
         "side": side, "size": str(ROWS), "page": "1", "amount": "",
         "authMaker": False, "canTrade": False,
     })
-    items = (j.get("result") or {}).get("items") or []
+    res = j.get("result") or {}
+    items = res.get("items") or []
     if not items:
+        if str(j.get("ret_code")) == "0":
+            raise RuntimeError("交易所未开通此法币市场(在线广告为 0)")
         raise RuntimeError("空列表: %s" % snip(j, 160))
     pmap = bybit_payment_map()
     ads = []
@@ -368,7 +371,11 @@ def fetch_bitget(asset, fiat, user_side):
                         it.get("goodRate") or it.get("turnoverRate") or user.get("goodRate")))
                 if ads:
                     return ads
+            if str(j.get("code")) == "00000":
+                raise RuntimeError("交易所未开通此法币市场(在线广告为 0)")
             errors.append("空响应: %s" % snip(j, 140))
+        except RuntimeError:
+            raise
         except Exception as e:  # noqa: BLE001
             errors.append("%s" % str(e)[:120])
     raise RuntimeError(" | ".join(errors))
@@ -376,7 +383,7 @@ def fetch_bitget(asset, fiat, user_side):
 
 # -------------------------------------------------------------------- HTX ----
 HTX_HOSTS = ["https://otc-api.trygofast.com", "https://otc-api.huobi.pro"]
-HTX_COIN = {"USDT": 2, "BTC": 1, "ETH": 3, "USDC": 7}
+HTX_COIN = {"USDT": 2, "BTC": 1, "ETH": 3}  # HTX OTC 无 USDC 市场
 HTX_CURRENCY_STATIC = {"CNY": 172, "USD": 2}  # 实测验证过的 id
 HTX_PAY = {"1": "银行卡", "2": "支付宝", "3": "微信", "9": "银行卡"}
 HTX_CURRENCY_CACHE = {}

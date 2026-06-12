@@ -43,11 +43,26 @@ push_branch() { # $1=dir $2=branch $3=msg
   )
 }
 
-# 站点本体由工作流的 pages job 发布 (workflow 构建类型), 此循环只负责数据分支。
+# gh-pages 维护一份"站点+数据"快照: 供 raw.githack.com 即时公网访问,
+# 也兼容用户在设置里选择 "Deploy from a branch" 的 legacy Pages 模式。
+publish_site() {
+  rm -rf "$WORK/site"
+  mkdir -p "$WORK/site/data"
+  cp -r "$SITE_SRC"/. "$WORK/site/"
+  cp "$DATA_DIR"/latest.json "$WORK/site/data/" 2>/dev/null || true
+  cp "$DATA_DIR"/history.json "$WORK/site/data/" 2>/dev/null || true
+  touch "$WORK/site/.nojekyll"
+  push_branch "$WORK/site" gh-pages "publish site $(date -u +%FT%TZ)" \
+    && echo "[loop] 站点快照已推送 gh-pages"
+}
+
 for ((i = 1; i <= CYCLES; i++)); do
   echo "=== cycle $i/$CYCLES $(date -u +%FT%TZ) ==="
   if python3 "$FETCHER" --out "$DATA_DIR" ${PROBE:+--probe}; then
     push_branch "$DATA_DIR" otc-data "data $(date -u +%FT%TZ)" || echo "[loop] 数据推送失败"
+    if [ "$i" -eq 1 ]; then
+      publish_site
+    fi
   else
     echo "[loop] 第 $i 轮抓取失败, 跳过发布"
   fi

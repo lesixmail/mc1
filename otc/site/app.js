@@ -235,7 +235,9 @@ function renderCards() {
 
 function shortErr(err) {
   if (!err) return "无数据";
+  if (/403|Access Denied/i.test(err)) return "交易所接口风控限制, 暂不可用";
   if (/451|restricted|unavailable.*legal/i.test(err)) return "接口对采集地区限制访问";
+  if (/未开通此法币市场|无货币映射/.test(err)) return "该交易所未开通此交易对市场";
   if (/无广告数据/.test(err)) return "该交易所不支持此交易对(或暂无挂单)";
   return err.length > 90 ? err.slice(0, 90) + "…" : err;
 }
