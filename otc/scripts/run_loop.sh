@@ -16,10 +16,11 @@ FETCHER="${GITHUB_WORKSPACE:-$(pwd)}/otc/scripts/fetch_otc.py"
 
 mkdir -p "$DATA_DIR"
 
-# 取回既有历史序列, 保证跨 run 连续
+# 取回既有历史序列 + 数据库, 保证跨 run 连续累积
 if git clone -q --depth 1 --branch otc-data "$REMOTE" "$WORK/datarepo" 2>/dev/null; then
   cp "$WORK/datarepo/history.json" "$DATA_DIR/" 2>/dev/null || true
-  echo "[loop] 已恢复历史数据 ($(wc -c <"$DATA_DIR/history.json" 2>/dev/null || echo 0) bytes)"
+  cp "$WORK/datarepo/otc.db"       "$DATA_DIR/" 2>/dev/null || true
+  echo "[loop] 已恢复: history=$(wc -c <"$DATA_DIR/history.json" 2>/dev/null || echo 0)B db=$(wc -c <"$DATA_DIR/otc.db" 2>/dev/null || echo 0)B"
 else
   echo "[loop] 数据分支不存在, 全新开始"
 fi
@@ -49,8 +50,10 @@ publish_site() {
   rm -rf "$WORK/site"
   mkdir -p "$WORK/site/data"
   cp -r "$SITE_SRC"/. "$WORK/site/"
-  cp "$DATA_DIR"/latest.json "$WORK/site/data/" 2>/dev/null || true
-  cp "$DATA_DIR"/history.json "$WORK/site/data/" 2>/dev/null || true
+  # 站点消费的全部 JSON 投影 (SQLite 本体 otc.db 不进站点, 仅留在数据分支)
+  for f in latest.json history.json merchants.json suspicious.json channels.json series.json; do
+    cp "$DATA_DIR/$f" "$WORK/site/data/" 2>/dev/null || true
+  done
   touch "$WORK/site/.nojekyll"
   push_branch "$WORK/site" gh-pages "publish site $(date -u +%FT%TZ)" \
     && echo "[loop] 站点快照已推送 gh-pages"

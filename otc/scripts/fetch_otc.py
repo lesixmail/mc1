@@ -19,6 +19,9 @@ from datetime import datetime, timezone
 
 import requests
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import db as dbmod  # noqa: E402  (同目录持久化层)
+
 UA_HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
@@ -106,17 +109,23 @@ def norm_rate(v):
     return round(min(x, 100.0), 1)
 
 
-def make_ad(price, amount, lo, hi, methods, merchant, orders, rate):
-    return {
+def make_ad(price, amount, lo, hi, methods, merchant, orders, rate, **extra):
+    ad = {
         "price": round(fnum(price), 6),
         "amount": round(fnum(amount), 2),
         "min": round(fnum(lo), 2),
         "max": round(fnum(hi), 2),
-        "methods": [str(m) for m in methods if m][:6],
-        "merchant": str(merchant or "")[:24],
+        "methods": [str(m) for m in methods if m][:8],
+        "merchant": str(merchant or "")[:28],
         "orders": int(fnum(orders)),
         "rate": norm_rate(rate),
     }
+    # 富字段 (各所能给多少给多少; None 不写入, 前端大表按列展示)
+    for k, v in extra.items():
+        if v is None or v == "":
+            continue
+        ad[k] = v
+    return ad
 
 
 # ---------------------------------------------------------------- Binance ----
@@ -134,13 +143,58 @@ def fetch_binance(asset, fiat, user_side):
     for it in (j.get("data") or []):
         adv = it.get("adv") or {}
         u = it.get("advertiser") or {}
+        active = u.get("activeTimeInSecond")
+        reg = u.get("registrationTime")  # 毫秒时间戳 (部分账号无)
+        reg_days = None
+        if reg:
+            try:
+                reg_days = int((time.time() - float(reg) / 1000) / 86400)
+            except (TypeError, ValueError):
+                reg_days = None
         ads.append(make_ad(
             adv.get("price"), adv.get("surplusAmount"),
             adv.get("minSingleTransAmount"), adv.get("maxSingleTransAmount"),
             [(m.get("tradeMethodName") or m.get("identifier") or "")
              for m in (adv.get("tradeMethods") or [])],
-            u.get("nickName"), u.get("monthOrderCount"), u.get("monthFinishRate")))
+            u.get("nickName"), u.get("monthOrderCount"), u.get("monthFinishRate"),
+            # —— 币安完整字段 ——
+            positiveRate=norm_rate(u.get("positiveRate")),
+            orderCount=_int_or_none(u.get("orderCount")),
+            userType=("商家" if (u.get("userType") == "merchant" or u.get("proMerchant"))
+                      else "用户"),
+            proMerchant=bool(u.get("proMerchant")),
+            vipLevel=_int_or_none(u.get("vipLevel")),
+            userGrade=_int_or_none(u.get("userGrade")),
+            userIdentity=u.get("userIdentity") or None,
+            registerDays=reg_days,
+            lastActiveMin=(round(fnum(active) / 60) if active not in (None, "") else None),
+            margin=_num_or_none(u.get("margin")),
+            marginUnit=u.get("marginUnit") or None,
+            payTimeLimit=_int_or_none(adv.get("payTimeLimit")),
+            minQuantity=_num_or_none(adv.get("minSingleTransQuantity")),
+            tradableQuantity=_num_or_none(adv.get("tradableQuantity")),
+            buyerRegDays=_int_or_none(adv.get("buyerRegDaysLimit")),
+            buyerKyc=bool(adv.get("buyerKycLimit")),
+            assetLocked=bool(adv.get("buyerBtcPositionLimit")),
+            remark=(str(adv.get("remarks"))[:60] if adv.get("remarks") else None),
+            advNo=adv.get("advNo") or None,
+            priceType=("浮动" if adv.get("priceType") == 1 else "固定"),
+        ))
     return ads
+
+
+def _int_or_none(v):
+    try:
+        return int(float(v)) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _num_or_none(v):
+    try:
+        return round(float(v), 4) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
 
 
 # -------------------------------------------------------------------- OKX ----
@@ -588,9 +642,195 @@ def update_history(hist_path, latest):
     # 汇率序列 (溢价历史计算用)
     for f, v in latest["fx"].items():
         push("fx|%s" % f, v, None)
+    # 30 日对照序列: 场外 USDT/CNY 中间价 + 人民银行中间价
+    rate = (latest.get("analytics") or {}).get("rate", {}).get("CNY") or {}
+    if rate.get("otc_mid"):
+        push("mid|CNY|USDT", rate["otc_mid"], None)
+    if rate.get("pboc"):
+        push("pboc|CNY", rate["pboc"], None)
     with open(hist_path, "w", encoding="utf-8") as fh:
         json.dump(hist, fh, ensure_ascii=False, separators=(",", ":"))
     return hist
+
+
+# ------------------------------------------------- 人民银行中间价 (CFETS) ----
+def fetch_pboc():
+    """美元兑人民币中间价 (人民银行授权 CFETS 发布的 central parity)。"""
+    parsers = [
+        ("https://www.chinamoney.com.cn/r/cms/www/chinamoney/data/fx/ccpr.json",
+         _parse_cfets),
+        ("https://www.chinamoney.com.cn/ags/ms/cm-u-bk-ccpr/CcprHisNew?startDate=&endDate=&currency=USD/CNY&pageNum=1&pageSize=1",
+         _parse_cfets_his),
+    ]
+    for url, parser in parsers:
+        try:
+            j = http_json("GET", url, timeout=18, allow_proxy=True,
+                          headers={"Referer": "https://www.chinamoney.com.cn/chinese/bkccpr/"})
+            v = parser(j)
+            if v and 5 < v < 9:   # 合理区间护栏
+                log("pboc USD/CNY = %s" % v)
+                return round(v, 4)
+            if PROBE:
+                log("PROBE pboc %s -> %s" % (url, snip(j, 300)))
+        except Exception as e:  # noqa: BLE001
+            log("pboc %s fail: %s" % (url[:60], e))
+    log("pboc 中间价获取失败, 将仅展示市场汇率")
+    return None
+
+
+def _parse_cfets(j):
+    recs = j.get("records") or (j.get("data") or {}).get("records") or []
+    for r in recs:
+        name = str(r.get("vrtEName") or r.get("foreignCName") or r.get("ccyPair") or "").upper()
+        if "USD/CNY" in name or "美元" in str(r.get("foreignCName") or ""):
+            return fnum(r.get("price") or r.get("ccprPrice") or r.get("ccpr"))
+    return None
+
+
+def _parse_cfets_his(j):
+    recs = (j.get("data") or {}).get("records") or j.get("records") or []
+    if recs and isinstance(recs, list):
+        r = recs[0]
+        return fnum(r.get("values", [None])[0] if r.get("values") else
+                    r.get("price") or r.get("ccpr"))
+    return None
+
+
+# ----------------------------------------------------------- 分析/聚合层 ----
+CHANNELS = [
+    ("支付宝", ("支付宝", "alipay")),
+    ("微信", ("微信", "wechat", "wxpay", "weixin")),
+    ("QQ钱包", ("qq",)),
+    ("银行卡", ("银行", "bank", "card", "transfer", "转账", "对公", "sepa", "swift")),
+]
+TURN_LOW, TURN_HIGH = 4, 20   # 可见盘口的日换手率估算区间
+
+
+def classify_channels(methods):
+    found = set()
+    for m in methods or []:
+        ml = str(m).lower()
+        for name, keys in CHANNELS:
+            if any(k.lower() in ml for k in keys):
+                found.add(name)
+    return found
+
+
+def compute_analytics(markets, fx, spot, pboc):
+    """从一轮快照派生: 汇率对照 / 成交量估算 / 渠道盘口 / 可疑压价。"""
+    channel_rows = {}   # (asset,fiat,channel,side) -> {n,sum,best,min,max}
+    channels_disp = {}  # "asset|fiat" -> {channel: {buy:{...}, sell:{...}}}
+    suspicious = []
+
+    for fiat, assets in markets.items():
+        for asset, exmap in assets.items():
+            for side in ("buy", "sell"):
+                for ex, m in exmap.items():
+                    if not m.get("ok"):
+                        continue
+                    ads = m.get(side) or []
+                    # 渠道聚合
+                    for ad in ads:
+                        p = ad.get("price") or 0
+                        if p <= 0:
+                            continue
+                        for ch in classify_channels(ad.get("methods")):
+                            key = (asset, fiat, ch, side)
+                            st = channel_rows.setdefault(
+                                key, {"n": 0, "sum": 0.0, "best": p, "min": p, "max": p})
+                            st["n"] += 1
+                            st["sum"] += p
+                            st["min"] = min(st["min"], p)
+                            st["max"] = max(st["max"], p)
+                            st["best"] = (min(st["best"], p) if side == "buy"
+                                          else max(st["best"], p))
+                    # 可疑压价 (当前轮, 供前端即时展示)
+                    for i, info in _suspect(ads, side).items():
+                        ad = ads[i]
+                        suspicious.append({
+                            "exchange": ex, "asset": asset, "fiat": fiat, "side": side,
+                            "merchant": ad.get("merchant"), "price": ad.get("price"),
+                            "top2_price": info[2], "below_abs": info[0],
+                            "below_pct": info[1], "amount": ad.get("amount"),
+                            "orders": ad.get("orders"), "rate": ad.get("rate"),
+                        })
+    for (asset, fiat, ch, side), st in channel_rows.items():
+        d = channels_disp.setdefault("%s|%s" % (asset, fiat), {})
+        d.setdefault(ch, {})[side] = {
+            "best": round(st["best"], 4), "avg": round(st["sum"] / st["n"], 4),
+            "min": round(st["min"], 4), "max": round(st["max"], 4), "n": st["n"],
+        }
+    suspicious.sort(key=lambda x: -(x["below_pct"] or 0))
+
+    # 汇率对照 (USDT/CNY)
+    rate = {}
+    cny = markets.get("CNY", {}).get("USDT", {})
+    mids = []
+    for ex, m in cny.items():
+        if not m.get("ok"):
+            continue
+        b = m["buy"][0]["price"] if m.get("buy") else None
+        s = m["sell"][0]["price"] if m.get("sell") else None
+        mid = (b + s) / 2 if b and s else (b or s)
+        if mid:
+            mids.append(mid)
+    otc_mid = sum(mids) / len(mids) if mids else None
+    market = fx.get("CNY")
+    if otc_mid:
+        rate["CNY"] = {
+            "otc_mid": round(otc_mid, 4), "market": market, "pboc": pboc,
+            "premium_market": round((otc_mid / market - 1) * 100, 3) if market else None,
+            "premium_pboc": round((otc_mid / pboc - 1) * 100, 3) if pboc else None,
+        }
+
+    # 成交量估算 (USDT/CNY, 透明启发式)
+    volume = {}
+    standing = 0.0
+    merchants_set = set()
+    monthly = {}
+    for ex, m in cny.items():
+        if not m.get("ok"):
+            continue
+        for side in ("buy", "sell"):
+            for ad in m.get(side) or []:
+                standing += ad.get("amount") or 0
+                mer = ad.get("merchant")
+                if mer:
+                    merchants_set.add((ex, mer))
+                    monthly[(ex, mer)] = max(monthly.get((ex, mer), 0),
+                                             ad.get("orders") or 0)
+    if standing > 0 and otc_mid:
+        volume["CNY"] = {
+            "standing_liq": round(standing, 1),
+            "est_low": round(standing * TURN_LOW),
+            "est_high": round(standing * TURN_HIGH),
+            "est_low_fiat": round(standing * TURN_LOW * otc_mid),
+            "est_high_fiat": round(standing * TURN_HIGH * otc_mid),
+            "merchants": len(merchants_set),
+            "monthly_orders": sum(monthly.values()),
+            "turn_low": TURN_LOW, "turn_high": TURN_HIGH,
+        }
+
+    return {"channel_rows": channel_rows, "channels": channels_disp,
+            "suspicious": suspicious[:60], "rate": rate, "volume": volume}
+
+
+def _suspect(ads, side, pct_thr=0.3, min_amount=50):
+    """与 db._suspect_indices 同义: 明显低于 Top2 的急售/急购广告。"""
+    valid = [(i, a) for i, a in enumerate(ads) if (a.get("price") or 0) > 0]
+    if len(valid) < 3:
+        return {}
+    asc = side == "buy"
+    ordered = sorted(valid, key=lambda x: x[1]["price"], reverse=not asc)
+    ref = ordered[1][1]["price"]
+    out = {}
+    for idx, ad in ordered:
+        p = ad["price"]
+        below_abs = (ref - p) if asc else (p - ref)
+        below_pct = below_abs / ref * 100 if ref else 0
+        if below_pct >= pct_thr and (ad.get("amount") or 0) >= min_amount:
+            out[idx] = (round(below_abs, 4), round(below_pct, 3), round(ref, 6))
+    return out
 
 
 # -------------------------------------------------------------------- main ----
@@ -606,7 +846,8 @@ def main():
     t0 = time.time()
     fx = fetch_fx()
     spot = fetch_spot()
-    log("fx=%s spot=%s" % (fx, spot))
+    pboc = fetch_pboc()
+    log("fx=%s spot=%s pboc=%s" % (fx, spot, pboc))
     for fiat in FIATS:
         for asset in ASSETS_BY_FIAT[fiat]:
             if fx.get(fiat) and spot.get(asset):
@@ -632,19 +873,39 @@ def main():
                     log("ERR %-7s %s/%s %s" % (ex, asset, fiat, m["error"]))
                 time.sleep(0.3)
 
+    now = int(time.time())
+    analytics = compute_analytics(markets, fx, spot, pboc)
     latest = {
-        "updated": int(time.time()),
+        "updated": now,
         "updatedISO": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "fx": fx, "spot": spot, "markets": markets,
+        "fx": fx, "spot": spot, "pboc": pboc, "markets": markets,
+        "analytics": analytics,
         "meta": {"exchanges": EXCHANGES, "fiats": FIATS,
                  "assetsByFiat": ASSETS_BY_FIAT, "rows": ROWS,
                  "okMarkets": ok_count, "errMarkets": err_count,
                  "fetchSeconds": round(time.time() - t0, 1)},
     }
+
+    # 持久化数据库 + 长期投影 (商家档案/可疑事件/渠道日/汇率日/成交量日)
+    try:
+        conn = dbmod.connect(os.path.join(args.out, "otc.db"))
+        dbmod.init(conn)
+        dbmod.record(conn, now, markets, analytics)
+        dbmod.prune(conn, now)
+        dbmod.write_projections(conn, args.out, now)
+        latest["meta"]["db"] = dbmod.db_stats(conn)
+        conn.close()
+        log("db: %s" % latest["meta"]["db"])
+    except Exception as e:  # noqa: BLE001
+        log("db error: %s" % e)
+        if PROBE:
+            traceback.print_exc()
+
     with open(os.path.join(args.out, "latest.json"), "w", encoding="utf-8") as fh:
         json.dump(latest, fh, ensure_ascii=False, separators=(",", ":"))
     update_history(os.path.join(args.out, "history.json"), latest)
-    log("done: ok=%d err=%d in %.1fs" % (ok_count, err_count, time.time() - t0))
+    log("done: ok=%d err=%d susp=%d in %.1fs" % (
+        ok_count, err_count, len(analytics.get("suspicious", [])), time.time() - t0))
     # 至少要有一部分市场成功才算成功
     if ok_count == 0:
         sys.exit(1)

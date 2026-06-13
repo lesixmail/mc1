@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OTC 雷达 · 六大交易所场外市场全景监控</title>
-<meta name="description" content="实时监控 Binance / OKX / Bybit / Gate / Bitget / HTX 六大交易所 P2P/OTC 市场:买卖盘口、场外折溢价指数、跨所价差、商家挂单、历史走势与预警。">
+<title>OTC 雷达 · USDT 场外市场全景监控与商家数据库</title>
+<meta name="description" content="实时监控 Binance/OKX/Bybit/Gate/Bitget/HTX 六大交易所 USDT 场外行情:人民银行中间价对照、场外溢价、每日成交量估算、压价急售商家数据库、币安全字段商家大表、支付渠道盘口统计、30日走势。">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>📡</text></svg>">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -14,65 +14,134 @@
     <span class="brand-icon">📡</span>
     <div>
       <h1>OTC 雷达 <span class="brand-en">OTC Radar</span></h1>
-      <p class="brand-sub">六大交易所场外市场全景监控</p>
+      <p class="brand-sub">六大交易所 USDT 场外市场全景监控 · 商家数据库</p>
     </div>
   </div>
   <div class="controls">
-    <div class="seg" id="fiat-seg" title="法币"></div>
-    <div class="seg" id="asset-seg" title="资产"></div>
+    <div class="seg" id="asset-seg" title="资产 (优先 USDT)"></div>
+    <div class="seg" id="fiat-seg" title="法币 (优先人民币)"></div>
   </div>
   <div class="status">
     <div class="status-line"><span class="dot" id="conn-dot"></span><span id="update-time">加载中…</span></div>
-    <div class="status-line muted"><span id="countdown">--</span> 秒后刷新 · <span id="src-health">-</span></div>
+    <div class="status-line muted"><span id="countdown">--</span> 秒后刷新 · <span id="db-stat">数据库 -</span></div>
   </div>
 </header>
 
 <nav class="subnav" id="subnav">
-  <a href="#sec-index">溢价指数</a>
-  <a href="#sec-cards">交易所概览</a>
+  <a href="#sec-fxcompare">汇率对照</a>
+  <a href="#sec-volume">成交量估算</a>
+  <a href="#sec-trend">30日走势</a>
+  <a href="#sec-suspicious">压价急售商家</a>
+  <a href="#sec-megatable">商家大表</a>
+  <a href="#sec-channels">渠道盘口</a>
   <a href="#sec-compare">跨所对比</a>
-  <a href="#sec-arb">套利监测</a>
-  <a href="#sec-depth">市场深度</a>
-  <a href="#sec-history">历史走势</a>
-  <a href="#sec-ads">商家挂单</a>
+  <a href="#sec-arb">套利</a>
+  <a href="#sec-depth">深度</a>
+  <a href="#sec-db">数据库</a>
   <a href="#sec-alerts">预警</a>
 </nav>
 
 <main>
-  <!-- 场外折溢价指数 -->
-  <section id="sec-index" class="panel banner">
+  <!-- 1. 人民银行中间价 vs 场外 USDT -->
+  <section id="sec-fxcompare" class="panel banner">
     <div class="banner-main">
-      <div class="banner-label">场外折溢价指数 <span class="hint" title="全市场买一/卖一中间价均值 ÷ (法币汇率 × 现货指数价) × 100。大于 100 表示场外溢价(入金需求强), 小于 100 表示折价(出金需求强)。参考 ChaiNext USDT 场外指数方法。">?</span></div>
-      <div class="banner-value" id="premium-index">--</div>
-      <div class="banner-tag" id="premium-tag">--</div>
+      <div class="banner-label">USDT/CNY 场外溢价 <span class="hint" title="场外全市场买一/卖一中间价相对人民银行美元中间价的偏离。USDT≈1美元,故与人行 USD/CNY 中间价直接可比。正溢价=场外比官方贵,通常意味入金/购汇需求强。">?</span></div>
+      <div class="banner-value" id="prem-pboc">--</div>
+      <div class="banner-tag" id="prem-pboc-tag">相对人民银行中间价</div>
     </div>
-    <div class="banner-grid" id="banner-grid"></div>
+    <div class="banner-grid" id="fx-grid"></div>
   </section>
 
-  <!-- 交易所卡片 -->
-  <section id="sec-cards">
-    <h2>交易所概览 <span class="h2-sub" id="cards-sub"></span></h2>
-    <div class="cards" id="cards"></div>
+  <!-- 2. 每日成交量估算 -->
+  <section id="sec-volume" class="panel">
+    <h2>中国境内 USDT/CNY 每日成交量估算 <span class="h2-sub">基于可见盘口的粗略区间,非真实成交额</span></h2>
+    <div class="vol-wrap">
+      <div class="vol-range" id="vol-range">
+        <div class="vol-big" id="vol-fiat">--</div>
+        <div class="vol-sub" id="vol-usdt">--</div>
+      </div>
+      <div class="vol-bars" id="vol-meta"></div>
+    </div>
+    <p class="method muted" id="vol-method"></p>
   </section>
 
-  <!-- 跨所对比 -->
-  <section id="sec-compare" class="panel">
-    <h2>跨所盘口对比</h2>
+  <!-- 3. 30日走势: 场外 vs 人行中间价 -->
+  <section id="sec-trend" class="panel">
+    <h2>30 日走势:场外 USDT/CNY 价 vs 人民银行中间价</h2>
+    <div class="chart-toolbar">
+      <div class="seg" id="trend-mode">
+        <button data-v="rate" class="on">价格对照</button>
+        <button data-v="premium">溢价 %</button>
+      </div>
+      <span class="muted" id="trend-note"></span>
+    </div>
+    <div id="trend-chart" class="chart tall"></div>
+  </section>
+
+  <!-- 4. 压价急售商家 -->
+  <section id="sec-suspicious" class="panel">
+    <h2>压价急售商家监测 <span class="h2-sub">明显低于本平台 Top2 报价的"着急出货"商家,长期记录</span></h2>
+    <div class="seg" id="susp-mode" style="margin-bottom:12px">
+      <button data-v="now" class="on">实时压价榜</button>
+      <button data-v="flagged">长期高频压价商家</button>
+      <button data-v="events">历史压价事件</button>
+    </div>
+    <div class="warn-box">⚠️ 风险提示:报价明显低于市场的急售商家,其 USDT 来源可能存在问题(涉黑/涉诈赃款),与之交易可能导致银行卡被冻结。本榜仅作风险提示,不构成对任何具体商家的定性。</div>
     <div class="table-wrap">
-      <table id="compare-table">
+      <table id="susp-table"><thead></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <!-- 5. 币安全字段商家大表 -->
+  <section id="sec-megatable" class="panel">
+    <h2>商家筛选大表 <span class="h2-sub">币安 API 全字段;其他平台对照同列排序。点表头排序,过滤行筛选</span></h2>
+    <div class="mega-toolbar">
+      <div class="seg" id="mega-ex"></div>
+      <div class="seg" id="mega-side">
+        <button data-v="buy" class="on">我要买入(商家卖出)</button>
+        <button data-v="sell">我要卖出(商家买入)</button>
+      </div>
+      <input id="mega-search" type="search" placeholder="🔎 全表搜索(商家/支付/备注)">
+      <button class="btn ghost" id="mega-reset">清空筛选</button>
+      <span class="muted" id="mega-count"></span>
+    </div>
+    <div class="table-wrap mega">
+      <table id="mega-table"><thead></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <!-- 6. 渠道盘口统计 -->
+  <section id="sec-channels" class="panel">
+    <h2>支付渠道盘口统计(当日) <span class="h2-sub">微信 / 支付宝 / 银行卡 / QQ钱包 等渠道当日盘口价、平均价、最低价</span></h2>
+    <div class="table-wrap">
+      <table id="chan-table">
         <thead><tr>
-          <th>交易所</th><th>买一价<span class="th-sub">我要买入</span></th><th>卖一价<span class="th-sub">我要卖出</span></th>
-          <th>买卖价差</th><th>溢价(买)</th><th>溢价(卖)</th>
-          <th>买盘挂单量</th><th>卖盘挂单量</th><th>状态</th>
+          <th>支付渠道</th>
+          <th>买入盘口<span class="th-sub">最优买价</span></th><th>买入均价</th><th>买入最低</th><th>买样本</th>
+          <th>卖出盘口<span class="th-sub">最优卖价</span></th><th>卖出均价</th><th>卖出最低</th><th>卖样本</th>
         </tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </section>
 
-  <!-- 套利监测 -->
+  <!-- 7. 跨所对比 -->
+  <section id="sec-compare" class="panel">
+    <h2>跨所盘口对比</h2>
+    <div class="table-wrap">
+      <table id="compare-table">
+        <thead><tr>
+          <th>交易所</th><th>买一价</th><th>卖一价</th><th>买卖价差</th>
+          <th>溢价(买)</th><th>买盘挂单</th><th>卖盘挂单</th><th>状态</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 8. 套利 -->
   <section id="sec-arb" class="panel">
-    <h2>跨所搬砖套利监测 <span class="h2-sub">未计手续费与转账成本, 仅供参考</span></h2>
+    <h2>跨所搬砖套利监测 <span class="h2-sub">未计手续费与转账成本</span></h2>
     <div class="table-wrap">
       <table id="arb-table">
         <thead><tr><th>#</th><th>买入(低价所)</th><th>买入价</th><th>卖出(高价所)</th><th>卖出价</th><th>毛价差</th><th>毛利率</th></tr></thead>
@@ -81,68 +150,30 @@
     </div>
   </section>
 
-  <!-- 市场深度 -->
+  <!-- 9. 深度 -->
   <section id="sec-depth" class="panel">
-    <h2>合并市场深度 <span class="h2-sub">各所前 15 档挂单累计量(实线=可买入盘, 虚线=可卖出盘)</span></h2>
+    <h2>合并市场深度 <span class="h2-sub">各所挂单累计量(实线=可买盘,虚线=可卖盘)</span></h2>
     <div id="depth-chart" class="chart tall"></div>
   </section>
 
-  <!-- 历史走势 -->
-  <section id="sec-history" class="panel">
-    <h2>历史走势</h2>
-    <div class="chart-toolbar">
-      <div class="seg" id="hist-mode">
-        <button data-v="price" class="on">价格</button>
-        <button data-v="premium">溢价 %</button>
-        <button data-v="spread">买卖价差</button>
-      </div>
-      <div class="seg" id="hist-range">
-        <button data-v="86400" class="on">24小时</button>
-        <button data-v="604800">7天</button>
-        <button data-v="2592000">30天</button>
-      </div>
-    </div>
-    <div id="history-chart" class="chart tall"></div>
+  <!-- 10. 数据库与数据源 -->
+  <section id="sec-db" class="panel">
+    <h2>商家数据库与数据源状态</h2>
+    <div class="db-cards" id="db-cards"></div>
+    <div class="src-grid" id="src-grid"></div>
   </section>
 
-  <!-- 商家挂单 -->
-  <section id="sec-ads" class="panel">
-    <h2>商家挂单簿</h2>
-    <div class="ads-toolbar">
-      <div class="seg" id="side-seg">
-        <button data-v="buy" class="on">我要买入</button>
-        <button data-v="sell">我要卖出</button>
-      </div>
-      <div class="seg" id="ex-filter"></div>
-      <div class="seg" id="pay-filter">
-        <button data-v="" class="on">全部支付</button>
-        <button data-v="支付宝">支付宝</button>
-        <button data-v="微信">微信</button>
-        <button data-v="银行卡">银行卡</button>
-      </div>
-      <input id="amount-filter" type="number" placeholder="按金额筛选限额" min="0">
-    </div>
-    <div class="table-wrap">
-      <table id="ads-table">
-        <thead><tr>
-          <th>交易所</th><th>商家</th><th>价格</th><th>溢价</th><th>可交易量</th><th>单笔限额</th><th>支付方式</th><th>成单数</th><th>成单率</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- 预警 -->
+  <!-- 11. 预警 -->
   <section id="sec-alerts" class="panel">
-    <h2>价格预警 <span class="h2-sub">条件满足时浏览器通知 + 提示音(本地保存, 需保持页面开启)</span></h2>
+    <h2>价格预警 <span class="h2-sub">条件满足时浏览器通知+提示音(本地保存,需保持页面开启)</span></h2>
     <div class="alert-form">
       <select id="alert-metric">
-        <option value="index">溢价指数</option>
-        <option value="buy1">买一价</option>
-        <option value="sell1">卖一价</option>
+        <option value="prem_pboc">相对人行溢价%</option>
+        <option value="prem_market">相对市场溢价%</option>
+        <option value="otc_mid">场外中间价</option>
         <option value="arb">最大跨所毛利率%</option>
+        <option value="susp">实时压价商家数</option>
       </select>
-      <select id="alert-ex"></select>
       <select id="alert-op"><option value=">">高于</option><option value="<">低于</option></select>
       <input id="alert-value" type="number" step="any" placeholder="阈值">
       <button id="alert-add" class="btn">添加预警</button>
@@ -150,18 +181,12 @@
     </div>
     <ul id="alert-list" class="alert-list"></ul>
   </section>
-
-  <!-- 数据源状态 -->
-  <section id="sec-srcs" class="panel">
-    <h2>数据源状态</h2>
-    <div class="src-grid" id="src-grid"></div>
-  </section>
 </main>
 
 <footer>
-  <p><strong>OTC 雷达</strong> · 数据来源: Binance P2P / OKX C2C / Bybit P2P / Gate C2C / Bitget P2P / HTX OTC 公开接口 · 法币汇率: open.er-api.com · 现货指数: Binance/Bybit 现货。</p>
-  <p>采集端每 5 分钟自动更新, 页面每 60 秒自动拉取。指数方法参考 ChaiNext USDT 场外折溢价指数; 功能对标 P2P.Army / BestChange 等行业工具。</p>
-  <p class="warn">⚠️ 风险提示: 本站仅作行情聚合展示, 不构成任何投资建议。场外交易存在收款风险(冻卡)、对手方欺诈等风险, 部分地区法币兑换加密货币受当地法规限制, 请自行评估合规性。</p>
+  <p><strong>OTC 雷达</strong> · 数据来源:Binance P2P / OKX C2C / Bybit P2P / Gate C2C / Bitget P2P / HTX OTC 公开接口 · 人民银行中间价:CFETS · 市场汇率:open.er-api.com</p>
+  <p>采集端每 5 分钟更新并写入 SQLite 商家数据库(otc-data 分支),页面每 60 秒拉取最新投影。功能对标 P2P.Army / AICoin·ChaiNext 场外指数 / BestChange。</p>
+  <p class="warn">⚠️ 风险提示:本站仅作行情聚合与风险研究展示,不构成投资建议,不对任何商家作定性结论。场外交易存在收款冻卡、对手方欺诈等风险,部分地区法币兑换加密货币受当地法规限制,请自行评估合规性。成交量为粗略估算,压价判定基于公开报价的统计偏离。</p>
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"
