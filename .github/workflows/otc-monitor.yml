@@ -60,8 +60,9 @@ jobs:
         run: |
           mkdir -p otc/site/data
           git fetch -q --depth 1 origin otc-data || true
-          git show origin/otc-data:latest.json  > otc/site/data/latest.json  2>/dev/null || echo '{}' > otc/site/data/latest.json
-          git show origin/otc-data:history.json > otc/site/data/history.json 2>/dev/null || echo '{}' > otc/site/data/history.json
+          for f in latest.json history.json merchants.json suspicious.json channels.json series.json; do
+            git show "origin/otc-data:$f" > "otc/site/data/$f" 2>/dev/null || echo '{}' > "otc/site/data/$f"
+          done
       - uses: actions/configure-pages@v5
         with:
           enablement: true
