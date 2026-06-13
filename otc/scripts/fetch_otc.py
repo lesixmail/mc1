@@ -901,6 +901,8 @@ def main():
         if PROBE:
             traceback.print_exc()
 
+    # channel_rows 仅供数据库消费 (tuple 键不可 JSON 化), 不进 latest.json
+    analytics.pop("channel_rows", None)
     with open(os.path.join(args.out, "latest.json"), "w", encoding="utf-8") as fh:
         json.dump(latest, fh, ensure_ascii=False, separators=(",", ":"))
     update_history(os.path.join(args.out, "history.json"), latest)
