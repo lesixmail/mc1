@@ -110,6 +110,27 @@ tbody tr:hover { background: var(--panel2); }
   border-radius: 5px; padding: 3px 6px; font-size: 11px; }
 input, select { background: var(--bg2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 7px 10px; font-size: 13px; }
 
+/* 币安接口全景 */
+.binapi-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.bsum { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; text-align: center; }
+.bsum.ok { border-color: rgba(46,204,143,.4); } .bsum.auth { border-color: rgba(240,185,11,.4); } .bsum.fail { border-color: rgba(255,93,108,.35); }
+.bsum .bk { color: var(--muted); font-size: 12px; } .bsum .bv { font-size: 22px; font-weight: 700; }
+.binapi-table code { font-size: 11px; color: #9fb4d6; word-break: break-all; }
+.binapi-table td.fields code { background: var(--bg2); padding: 0 4px; border-radius: 3px; margin: 1px; display: inline-block; }
+.binapi-table .small { font-size: 11px; white-space: normal; max-width: 320px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 5px; font-size: 11px; white-space: nowrap; }
+.badge.ok { background: rgba(46,204,143,.16); color: var(--green); }
+.badge.auth { background: rgba(240,185,11,.16); color: var(--amber); }
+.badge.fail { background: rgba(255,93,108,.14); color: var(--red); }
+.binapi-h3 { font-size: 14px; margin: 16px 0 8px; }
+.field-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px; }
+.field-cell { background: var(--bg2); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; }
+.field-cell.used { border-color: rgba(46,204,143,.45); }
+.field-cell code { color: #9fb4d6; font-size: 12px; } .field-cell span { color: var(--muted); font-size: 11px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.jsonbox { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 11px; overflow: auto; max-height: 240px; color: #9fb4d6; }
+code { font-family: "SF Mono", Menlo, Consolas, monospace; }
+
 /* 数据库卡片 */
 .db-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .db-cell { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }

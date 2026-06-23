@@ -35,6 +35,8 @@ const state = {
   suspicious: null,
   channels: null,
   merchants: null,
+  binapi: null,
+  binapiTab: "endpoints",
   countdown: REFRESH_SEC,
   activeSource: "-",
 };
@@ -59,16 +61,18 @@ async function loadLatest() {
   updateStatusBar();
 }
 async function loadSlow() {
-  const [hist, series, susp, chan, mer] = await Promise.all([
+  const [hist, series, susp, chan, mer, bapi] = await Promise.all([
     fetchJSON("history.json"), fetchJSON("series.json"),
     fetchJSON("suspicious.json"), fetchJSON("channels.json"), fetchJSON("merchants.json"),
+    fetchJSON("binance_api.json"),
   ]);
   if (hist) state.history = hist;
   if (series) state.series = series;
   if (susp) state.suspicious = susp;
   if (chan) state.channels = chan;
   if (mer) state.merchants = mer;
-  renderTrend(); renderSuspicious(); renderChannels(); renderDbCards();
+  if (bapi) state.binapi = bapi;
+  renderTrend(); renderSuspicious(); renderChannels(); renderDbCards(); renderBinApi();
 }
 
 /* ---------------- 工具 ---------------- */
@@ -485,6 +489,111 @@ function buildMegaToolbar() {
     state.megaSide, (v) => { state.megaSide = v; renderMega(); });
 }
 
+/* ---------------- 5b. 币安接口全景 ---------------- */
+// 币安 adv/search 字段字典(中文释义 + 是否已用于本站大表)
+const BIN_FIELD_DOC = {
+  adv: {
+    advNo: "广告编号", classify: "广告分类(mass/profession)", tradeType: "方向 BUY/SELL",
+    asset: "加密资产", fiatUnit: "法币", advStatus: "广告状态", priceType: "定价类型 1浮动/0固定",
+    priceFloatingRatio: "价格浮动比例", rateFloatingRatio: "汇率浮动比例", currencyRate: "参考汇率",
+    price: "单价★", initAmount: "初始挂单量", surplusAmount: "剩余可交易量★", tradableQuantity: "可交易数量★",
+    minSingleTransAmount: "单笔最小(法币)★", maxSingleTransAmount: "单笔最大(法币)★",
+    minSingleTransQuantity: "单笔最小(数量)★", maxSingleTransQuantity: "单笔最大(数量)",
+    dynamicMaxSingleTransAmount: "动态单笔上限", payTimeLimit: "付款时限(分)★",
+    tradeMethods: "支付方式数组★", remarks: "商家备注★", autoReplyMsg: "自动回复语",
+    isTradable: "是否可交易", buyerKycLimit: "买家需KYC★", buyerRegDaysLimit: "买家注册天数要求★",
+    buyerBtcPositionLimit: "买家持仓要求★", takerAdditionalKycRequired: "额外KYC要求",
+    commissionRate: "手续费率", fiatSymbol: "法币符号", assetScale: "资产精度",
+    fiatScale: "法币精度", priceScale: "价格精度", launchCountry: "投放国家", abnormalStatusList: "异常状态",
+  },
+  advertiser: {
+    userNo: "用户编号", realName: "实名(脱敏)", nickName: "商家昵称★", margin: "保证金★",
+    marginUnit: "保证金币种", orderCount: "累计成交订单★", monthOrderCount: "月成交订单★",
+    monthFinishRate: "月成交率★", positiveRate: "好评率★", advConfirmTime: "确认时长",
+    userType: "类型 user/merchant★", userGrade: "用户等级★", userIdentity: "认证身份★",
+    proMerchant: "专业商家★", vipLevel: "VIP等级★", isBlocked: "是否封禁",
+    activeTimeInSecond: "上次活跃(秒)★", badges: "徽章", registrationTime: "注册时间★",
+    userStatsRet: "统计扩展", tagIconUrls: "标签图标",
+  },
+  tradeMethods: {
+    payId: "支付ID", payType: "支付类型", payAccount: "收款账号(脱敏)", payBank: "银行",
+    paySubBank: "支行", identifier: "标识符", tradeMethodName: "支付方式名★",
+    tradeMethodShortName: "简称", iconUrlColor: "图标色",
+  },
+};
+const STATUS_BADGE = {
+  ok: ["✅ 可用", "ok"], auth: ["🔒 需鉴权", "auth"],
+  fail: ["⛔ 不可用/弃用", "fail"],
+};
+function renderBinApi() {
+  const sumEl = $("#binapi-summary"), body = $("#binapi-body");
+  if (!sumEl) return;
+  const d = state.binapi;
+  if (!d) { sumEl.innerHTML = '<span class="muted">币安接口探测数据加载中…</span>'; return; }
+  const s = d.summary || {};
+  sumEl.innerHTML = [
+    { k: "探测接口", v: s.total, c: "" }, { k: "公开可用", v: s.ok, c: "ok" },
+    { k: "需鉴权", v: s.auth, c: "auth" }, { k: "不可用/弃用", v: s.fail, c: "fail" },
+    { k: "实测时间", v: d.updatedISO ? new Date(d.updated * 1000).toLocaleString("zh-CN", { hour12: false }) : "-", c: "" },
+  ].map((x) => `<div class="bsum ${x.c}"><div class="bk">${esc(x.k)}</div><div class="bv">${esc(x.v ?? "-")}</div></div>`).join("");
+  // tabs
+  $("#binapi-tab").querySelectorAll("button").forEach((b) => b.onclick = () => {
+    $("#binapi-tab").querySelectorAll("button").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on"); state.binapiTab = b.dataset.v; renderBinApiBody();
+  });
+  renderBinApiBody();
+}
+function renderBinApiBody() {
+  const body = $("#binapi-body"), d = state.binapi;
+  if (!body || !d) return;
+  if (state.binapiTab === "endpoints") {
+    let h = '<div class="table-wrap"><table class="binapi-table"><thead><tr><th>分组</th><th>接口</th><th>方法</th><th>路径</th><th>状态</th><th>HTTP/code</th><th>用途</th><th>返回字段(样本)</th></tr></thead><tbody>';
+    for (const e of d.endpoints || []) {
+      const [label, cls] = STATUS_BADGE[e.status] || ["?", ""];
+      h += `<tr>
+        <td class="l">${esc(e.group)}</td>
+        <td class="l"><strong>${esc(e.name)}</strong></td>
+        <td>${esc(e.method)}</td>
+        <td class="l"><code>${esc(e.path)}</code></td>
+        <td><span class="badge ${cls}">${label}</span></td>
+        <td>${e.http || "-"}${e.bizCode ? " / " + esc(e.bizCode) : ""}</td>
+        <td class="l small">${esc(e.purpose)}</td>
+        <td class="l small fields">${(e.fields || []).slice(0, 10).map((f) => `<code>${esc(f.replace("data[].", "").replace("data.", ""))}</code>`).join(" ") || (e.message ? esc(e.message) : "—")}</td>
+      </tr>`;
+    }
+    body.innerHTML = h + "</tbody></table></div>";
+  } else if (state.binapiTab === "fields") {
+    const ex = d.extracted || {};
+    const groups = [
+      ["adv 广告对象", ex.advFields, BIN_FIELD_DOC.adv],
+      ["advertiser 商家对象", ex.advertiserFields, BIN_FIELD_DOC.advertiser],
+      ["tradeMethods 支付方式", ex.tradeMethodFields, BIN_FIELD_DOC.tradeMethods],
+    ];
+    let h = '<p class="muted" style="margin-bottom:10px">★ = 本站「商家大表」已采集并展示的字段。以下为 adv/search 实测返回的完整字段清单:</p>';
+    for (const [title, fields, doc] of groups) {
+      if (!fields || !fields.length) continue;
+      h += `<h3 class="binapi-h3">${esc(title)} <span class="muted">(${fields.length} 字段)</span></h3><div class="field-grid">`;
+      for (const f of fields) {
+        const meaning = doc[f] || "";
+        const used = meaning.includes("★");
+        h += `<div class="field-cell ${used ? "used" : ""}"><code>${esc(f)}</code><span>${esc(meaning.replace("★", "") || "—")}</span></div>`;
+      }
+      h += "</div>";
+    }
+    body.innerHTML = h || '<p class="empty">字段字典需等待 adv/search 实测返回后显示</p>';
+  } else {
+    const ex = d.extracted || {};
+    let h = "";
+    const chip = (arr) => (arr || []).map((x) => `<span class="pay-tag">${esc(x)}</span>`).join(" ");
+    if (ex.fiats) h += `<h3 class="binapi-h3">支持法币 <span class="muted">(${ex.fiats.length})</span></h3><div class="chips">${chip(ex.fiats)}</div>`;
+    if (ex.assets) h += `<h3 class="binapi-h3">支持资产 <span class="muted">(${ex.assets.length})</span></h3><div class="chips">${chip(ex.assets)}</div>`;
+    if (ex.payMethods) h += `<h3 class="binapi-h3">支付方式全集 <span class="muted">(${ex.payMethods.length})</span></h3><div class="chips">${chip(ex.payMethods)}</div>`;
+    if (ex.areas) h += `<h3 class="binapi-h3">交易区/地区 <span class="muted">(${ex.areas.length})</span></h3><div class="chips">${chip(ex.areas)}</div>`;
+    if (ex.quotePrice) h += `<h3 class="binapi-h3">官方报价 quote-price</h3><pre class="jsonbox">${esc(JSON.stringify(ex.quotePrice, null, 1)).slice(0, 600)}</pre>`;
+    body.innerHTML = h || '<p class="empty">实测元数据需等待 filter-conditions / agent 接口可用后显示(可能受币安风控影响)</p>';
+  }
+}
+
 /* ---------------- 6. 渠道盘口 ---------------- */
 function renderChannels() {
   const tbody = $("#chan-table tbody"); tbody.innerHTML = "";
@@ -707,7 +816,7 @@ function renderAll() {
   buildTopControls();
   renderFxCompare(); renderVolume(); renderCompare(); renderArb(); renderDepth();
   buildMegaToolbar(); renderMega();
-  renderChannels(); renderSuspicious(); renderSources(); renderDbCards();
+  renderChannels(); renderSuspicious(); renderSources(); renderDbCards(); renderBinApi();
 }
 
 /* ---------------- 初始化 ---------------- */

@@ -33,6 +33,7 @@
   <a href="#sec-trend">30日走势</a>
   <a href="#sec-suspicious">压价急售商家</a>
   <a href="#sec-megatable">商家大表</a>
+  <a href="#sec-binapi">币安接口全景</a>
   <a href="#sec-channels">渠道盘口</a>
   <a href="#sec-compare">跨所对比</a>
   <a href="#sec-arb">套利</a>
@@ -108,6 +109,19 @@
     <div class="table-wrap mega">
       <table id="mega-table"><thead></thead><tbody></tbody></table>
     </div>
+  </section>
+
+  <!-- 5b. 币安 OTC 接口全景 -->
+  <section id="sec-binapi" class="panel">
+    <h2>币安 OTC(P2P/C2C)接口全景 <span class="h2-sub">逐个实测币安 P2P 公开接口的可达性 / 鉴权 / 返回字段</span></h2>
+    <div class="binapi-summary" id="binapi-summary"></div>
+    <div class="seg" id="binapi-tab" style="margin:14px 0">
+      <button data-v="endpoints" class="on">接口清单</button>
+      <button data-v="fields">广告字段字典</button>
+      <button data-v="meta">实测元数据</button>
+    </div>
+    <div id="binapi-body"></div>
+    <p class="method muted">说明:这些 <code>bapi/c2c/…</code> 是币安网页前端调用的内部接口,官方 API 文档不收录;<code>agent/*</code> 为官方 Skills Hub 文档化的公开接口;<code>sapi/v1/c2c/*</code> 为需 API Key 签名的官方接口(此处仅验证其存在与鉴权要求)。状态每 5 分钟实测刷新。</p>
   </section>
 
   <!-- 6. 渠道盘口统计 -->
