@@ -21,6 +21,7 @@ import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import db as dbmod  # noqa: E402  (同目录持久化层)
+import probe_binance  # noqa: E402  (币安接口全景探测)
 
 UA_HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -900,6 +901,14 @@ def main():
         log("db error: %s" % e)
         if PROBE:
             traceback.print_exc()
+
+    # 币安接口全景探测 (轻量, 单跑约 15 个请求; 失败不影响主流程)
+    try:
+        api = probe_binance.run(args.out)
+        latest["meta"]["binanceApi"] = api.get("summary")
+        log("binance api probe: %s" % api.get("summary"))
+    except Exception as e:  # noqa: BLE001
+        log("binance probe error: %s" % e)
 
     # channel_rows 仅供数据库消费 (tuple 键不可 JSON 化), 不进 latest.json
     analytics.pop("channel_rows", None)

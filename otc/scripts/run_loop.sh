@@ -51,7 +51,7 @@ publish_site() {
   mkdir -p "$WORK/site/data"
   cp -r "$SITE_SRC"/. "$WORK/site/"
   # 站点消费的全部 JSON 投影 (SQLite 本体 otc.db 不进站点, 仅留在数据分支)
-  for f in latest.json history.json merchants.json suspicious.json channels.json series.json; do
+  for f in latest.json history.json merchants.json suspicious.json channels.json series.json binance_api.json; do
     cp "$DATA_DIR/$f" "$WORK/site/data/" 2>/dev/null || true
   done
   touch "$WORK/site/.nojekyll"
