@@ -134,9 +134,12 @@ def run(out_dir):
         # 鉴权判定
         auth = False
         blob = json.dumps(res.get("json") or {}, ensure_ascii=False).lower()
-        if res["http"] in (401, 403) or "login" in blob or "signature" in blob \
+        if res["http"] in (401, 403, 451) or "login" in blob or "signature" in blob \
            or "api-key" in blob or "apikey" in blob or "unauthor" in blob \
            or str(code) in ("100001003", "100002001", "-1022", "-2014", "-1002"):
+            auth = True
+        # SAPI 签名接口: 非 200 一律视为"需签名"(其本质就是要 API Key)
+        if grp == "签名" and not biz_ok:
             auth = True
         path = url.replace(P2P, "").replace(WWW, "")
         rec = {
